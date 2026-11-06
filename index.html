@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guardiões do Oceano 3D - Versão Final</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #87CEEB; }
+        #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        
+        /* UI do Jogo (Escondida no Início) */
+        #ui-layer { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 24px; height: 24px;
+            transform: translate(-50%, -50%); opacity: 0.9;
+        }
+        #crosshair::before, #crosshair::after {
+            content: ''; position: absolute; background: #ffffff;
+            box-shadow: 0 0 2px #000, 1px 1px 0 #000, -1px -1px 0 #000;
+        }
+        /* Barra vertical e horizontal formando a cruz clássica estilo Minecraft */
+        #crosshair::before { top: 0; left: 10px; width: 4px; height: 24px; }
+        #crosshair::after { top: 10px; left: 0; width: 24px; height: 4px; }
+        
+        .slogan-anim { animation: popIn 1.5s ease-out forwards; }
+        @keyframes popIn {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            20% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+            80% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(0.8); opacity: 0; }
+        }
+
+        .blink-red { animation: blink 1s infinite; color: #ff4444; }
+        .text-green { color: #44ff44; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body>
+
+    <!-- Menu Inicial -->
+    <div id="start-screen" class="absolute inset-0 bg-blue-900 bg-opacity-90 flex flex-col items-center justify-center z-50 text-white p-4">
+        <h1 class="text-5xl font-black mb-4 text-center text-blue-300 drop-shadow-lg">GUARDIÕES DO OCEANO 3D</h1>
+        <p class="text-lg text-center max-w-2xl mb-8">
+            Um projeto sobre a força da linguagem nas campanhas ambientais!<br>
+            <strong>Missão:</strong> Limpe a ilha, derrote o Monstro do Lixo e deixe sua mensagem em 2 minutos.
+        </p>
+        
+        <div class="bg-blue-800 p-6 rounded-xl w-full max-w-md shadow-2xl mb-6 border-2 border-blue-500">
+            <label class="block mb-2 font-bold text-blue-200">Seu Nome / Apelido:</label>
+            <input type="text" id="playerName" placeholder="Digite seu nome..." class="w-full p-3 rounded bg-blue-950 text-white border border-blue-400 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-300" maxlength="20">
+            
+            <label class="block mb-2 font-bold text-blue-200">Turma <span class="text-sm font-normal">(Opcional)</span>:</label>
+            <input type="text" id="playerClass" placeholder="Ex: 3º Ano A" class="w-full p-3 rounded bg-blue-950 text-white border border-blue-400 mb-6 focus:outline-none focus:ring-2 focus:ring-blue-300" maxlength="15">
+            
+            <button id="btn-play" class="w-full bg-green-500 hover:bg-green-400 text-white font-bold py-4 px-6 rounded-lg text-xl shadow-lg transition-transform transform hover:scale-105">
+                ▶ INICIAR CAMPANHA
+            </button>
+        </div>
+        <p class="text-sm text-blue-300">Controles: [W, A, S, D] para andar • [Mouse] para olhar • [Clique] para interagir</p>
+    </div>
+
+    <!-- Ranking Sidebar (Fixo na direita) -->
+    <div id="ranking-sidebar" class="absolute top-0 right-0 w-64 h-full bg-black bg-opacity-80 text-white flex flex-col z-40 border-l-2 border-yellow-500 pointer-events-auto">
+        <div class="p-4 bg-gray-900 border-b-2 border-yellow-500 shadow-md">
+            <h2 class="text-xl font-bold text-yellow-400 text-center">🏆 RANKING 🏆</h2>
+            <p class="text-xs text-gray-400 text-center mt-1">Atualizado em tempo real</p>
+        </div>
+        <div class="flex-1 overflow-y-auto p-3 custom-scrollbar">
+            <ul id="ranking-list" class="space-y-3 text-sm">
+                <!-- Preenchido via JS -->
+            </ul>
+        </div>
+    </div>
+
+    <style>
+        /* Estilo da barra de rolagem do ranking */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #1f2937; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #eab308; border-radius: 10px; }
+    </style>
+
+    <!-- Jogo 3D -->
+    <div id="game-container"></div>
+
+    <!-- Interface In-Game -->
+    <div id="ui-layer">
+        <div id="crosshair"></div>
+        
+        <!-- Painel HUD Superior Esquerdo -->
+        <div class="absolute top-4 left-4 bg-gray-900 bg-opacity-80 text-white p-4 rounded-lg shadow-lg border-2 border-gray-600 pointer-events-none">
+            <h2 class="text-2xl font-black text-blue-400 mb-2">⏱ Tempo: <span id="hud-time">120</span>s</h2>
+            
+            <!-- Caixa de Objetivos Dinâmica -->
+            <div id="objective-box" class="bg-gray-800 p-2 rounded border border-gray-500 mb-3">
+                <p id="hud-objective" class="font-bold text-lg text-yellow-300">👉 OBJETIVO: Colete 10 Lixos</p>
+            </div>
+
+            <div class="text-sm space-y-1">
+                <p>Garrafas: <span id="inv-garrafas" class="font-bold text-blue-300">0</span></p>
+                <p>Canudos: <span id="inv-canudos" class="font-bold text-red-300">0</span></p>
+                <p>Redes: <span id="inv-redes" class="font-bold text-green-300">0</span></p>
+                <p>Pneus: <span id="inv-pneus" class="font-bold text-gray-400">0</span></p>
+                <div class="mt-2 pt-2 border-t border-gray-600">
+                    <p class="font-bold">Progresso: <span id="hud-progress">0</span> / 10</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slogans de Impacto (Centro da Tela) -->
+        <div id="slogan-container" class="absolute top-1/2 left-1/2 text-center pointer-events-none opacity-0" style="transform: translate(-50%, -50%); text-shadow: 2px 2px 4px #000;">
+            <h2 id="slogan-text" class="text-5xl font-black text-yellow-300 uppercase italic"></h2>
+        </div>
+    </div>
+
+    <!-- Tela Final (Relatório) -->
+    <div id="end-screen" class="hidden absolute inset-0 bg-green-900 bg-opacity-95 flex flex-col items-center justify-center z-50 text-white p-6">
+        <h1 class="text-5xl font-black mb-6 text-green-300 drop-shadow-lg">CAMPANHA CONCLUÍDA!</h1>
+        
+        <div class="bg-white text-black p-8 rounded-xl max-w-2xl shadow-2xl relative overflow-hidden">
+            <!-- Fita decorativa -->
+            <div class="absolute top-0 left-0 w-full h-4 bg-green-500"></div>
+            
+            <h2 class="text-3xl font-bold mb-4 text-gray-800">Relatório de Impacto</h2>
+            <p class="text-lg mb-4 text-gray-700">Parabéns <span id="end-name" class="font-bold text-green-700"></span>! Você e sua turma protegeram nosso bioma!</p>
+            
+            <div class="grid grid-cols-2 gap-4 mb-6 text-center">
+                <div class="bg-gray-100 p-4 rounded-lg border border-gray-300">
+                    <p class="text-sm text-gray-500 font-bold uppercase">Tempo Restante</p>
+                    <p class="text-3xl font-black text-blue-600"><span id="end-time">0</span>s</p>
+                </div>
+                <div class="bg-gray-100 p-4 rounded-lg border border-gray-300">
+                    <p class="text-sm text-gray-500 font-bold uppercase">Itens Retirados</p>
+                    <p class="text-3xl font-black text-red-600"><span id="end-trash">0</span></p>
+                </div>
+            </div>
+
+            <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                <h3 class="font-bold text-green-800 mb-2">📣 O Poder da Nossa Linguagem</h3>
+                <p class="text-gray-700 text-sm leading-relaxed">
+                    A linguagem das campanhas ambientais é fundamental para a defesa dos mares e da natureza. 
+                    Ao espalhar mensagens claras (slogans) e conscientizar a sociedade, transformamos atitudes!
+                    Mais de 8 milhões de toneladas de plástico entram no oceano todos os anos. A sua voz é a ferramenta para mudar essa realidade!
+                </p>
+            </div>
+            
+            <button onclick="location.reload()" class="mt-6 w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-lg text-lg transition-colors">
+                Voltar à Feira (Reiniciar)
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURAÇÕES GERAIS ---
+        const slogans = [
+            "O MAR NÃO É LIXEIRA!",
+            "O OCEANO SUFOCA!",
+            "REDUZA, REUSE, RECICLE!",
+            "A NATUREZA ESCUTA!",
+            "SALVE A VIDA MARINHA!",
+            "SUA ATITUDE MUDA TUDO!",
+            "MENOS LIXO, MAIS VIDA!",
+            "A LINGUAGEM TRANSFORMA!"
+        ];
+
+        let camera, scene, renderer, controls;
+        let objects = []; // Objetos colidíveis (chão, lixo)
+        let animals = []; // Animais para animação
+        let raycaster;
+        let isGameEnded = false;
+        
+        // Fases: COLETA (Pega 10 lixos) -> BOSS (Mata a garrafa) -> PLACA (Clica no chão)
+        let gamePhase = 'COLETA'; 
+        let timeLeft = 120;
+        let timerInterval;
+        let bossGroup; // Boss agora é um grupo de blocos
+        let bossHealth = 5; 
+        let projectiles = [];
+
+        let removedTrash = 0;
+        let metaLixo = 10; 
+        
+        let isAudioInitialized = false;
+        let playerHandsGroup, rightHandMesh, leftHandMesh;
+        let handSwingTime = 0;
+
+        let inventario = {
+            "Garrafas de Plástico": 0,
+            "Canudos Plásticos": 0,
+            "Redes de Pesca": 0,
+            "Pneus": 0
+        };
+        const categoriasLixo = Object.keys(inventario);
+
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let prevTime = performance.now();
+        let velocity;
+        let direction;
+        
+        // Ranking (Simulação LocalStorage para o evento)
+        let rankingData = JSON.parse(localStorage.getItem('guardioes_ranking')) || [];
+
+        // --- GERADORES DE TEXTURA EM BLOCOS (CANVAS) ---
+
+        function createColorTexture(hexColor, noiseStrength = 10) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 16;
+            canvas.height = 16;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = hexColor;
+            ctx.fillRect(0,0,16,16);
+            for(let i=0; i<40; i++) {
+                ctx.fillStyle = `rgba(0,0,0,${Math.random() * (noiseStrength/100)})`;
+                ctx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 1, 1);
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.magFilter = THREE.NearestFilter;
+            return tex;
+        }
+
+        function createTrashTexture(baseColor = '#2c3e50') {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = baseColor;
+            ctx.fillRect(0, 0, 32, 32);
+            
+            ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(1, 1, 30, 30); // Borda
+            
+            const colors = ['#e74c3c', '#f1c40f', '#ecf0f1', '#3498db', '#1abc9c'];
+            // Desenhar canudos e plásticos
+            for(let i = 0; i < 15; i++) {
+                ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+                const x = Math.random() * 26;
+                const y = Math.random() * 26;
+                if (Math.random() > 0.6) {
+                    ctx.fillRect(x, y, 2, 8); // Canudo
+                } else {
+                    ctx.fillRect(x, y, 4, 4); // Plástico amassado
+                }
+            }
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.magFilter = THREE.NearestFilter;
+            return texture;
+        }
+
+        function createBossFaceTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            
+            // Fundo sujo
+            ctx.fillStyle = '#1b4f72';
+            ctx.fillRect(0, 0, 32, 32);
+            // Algas
+            ctx.fillStyle = '#117711';
+            ctx.fillRect(0, 20, 32, 12);
+            ctx.fillRect(5, 10, 5, 15);
+
+            // Olhos Vermelhos Maus
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(6, 8, 6, 4); // Esq
+            ctx.fillRect(20, 8, 6, 4); // Dir
+            
+            // Pupilas brancas
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(8, 9, 2, 2);
+            ctx.fillRect(22, 9, 2, 2);
+
+            // Boca com dentes
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(8, 20, 16, 6);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(10, 20, 2, 2); ctx.fillRect(14, 20, 2, 2); ctx.fillRect(18, 20, 2, 2); // Dentes cima
+            ctx.fillRect(12, 24, 2, 2); ctx.fillRect(16, 24, 2, 2); // Dentes baixo
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.magFilter = THREE.NearestFilter;
+            return tex;
+        }
+
+        function createLixeiraTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#2980b9'; // Azul reciclagem
+            ctx.fillRect(0,0,32,32);
+            ctx.strokeStyle = '#1f618d';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(2,2,28,28);
+            // Simbolo de reciclagem simples
+            ctx.fillStyle = '#ffffff';
+            ctx.font = "20px Arial";
+            ctx.fillText("♻", 6, 24);
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.magFilter = THREE.NearestFilter;
+            return tex;
+        }
+
+        function createSignTexture(text) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            
+            // Fundo de tábuas de madeira estilo Minecraft
+            ctx.fillStyle = '#8B5A2B';
+            ctx.fillRect(0, 0, 512, 256);
+
+            // Linhas de ripas de madeira
+            ctx.fillStyle = '#704214';
+            ctx.fillRect(0, 80, 512, 6);
+            ctx.fillRect(0, 170, 512, 6);
+
+            // Moldura externa grossa com margem
+            ctx.strokeStyle = '#3E2723';
+            ctx.lineWidth = 16;
+            ctx.strokeRect(8, 8, 496, 240);
+
+            // Borda interna pontilhada/entalhada
+            ctx.strokeStyle = '#5D4037';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(26, 26, 460, 204);
+
+            // Texto com quebra elegante e sombra para legibilidade total
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            // Sombra do texto
+            ctx.fillStyle = '#1b120c';
+            ctx.font = '900 36px "Inter", sans-serif';
+            ctx.fillText('TU FEZ TUA PARTE,', 258, 102);
+            ctx.font = '900 48px "Inter", sans-serif';
+            ctx.fillText('TCHÊ! 🌊', 258, 162);
+
+            // Texto frontal em relevo dourado/amarelado
+            ctx.fillStyle = '#FFF8DC';
+            ctx.font = '900 36px "Inter", sans-serif';
+            ctx.fillText('TU FEZ TUA PARTE,', 256, 100);
+            ctx.fillStyle = '#FFE082';
+            ctx.font = '900 48px "Inter", sans-serif';
+            ctx.fillText('TCHÊ! 🌊', 256, 160);
+            
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.magFilter = THREE.LinearFilter;
+            return tex;
+        }
+
+        // --- INICIALIZAÇÃO DO THREE.JS ---
+
+        function init() {
+            const container = document.getElementById('game-container');
+            
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 90); // Fog expandido para ver o mar
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            velocity = new THREE.Vector3();
+            direction = new THREE.Vector3();
+
+            // Iluminação
+            const light = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
+            light.position.set(0, 200, 0);
+            scene.add(light);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+            dirLight.position.set(10, 50, 20);
+            scene.add(dirLight);
+
+            // Controles (PointerLock)
+            controls = new THREE.PointerLockControls(camera, document.body);
+            scene.add(controls.getObject());
+
+            // Mãozinhas em primeira pessoa presas à câmera
+            criarMaosJogador();
+
+            controls.addEventListener('lock', () => {
+                if(!isGameEnded && document.getElementById('start-screen').style.display === 'none') {
+                    document.getElementById('ui-layer').style.display = 'block';
+                    if(Tone.context.state !== 'running') Tone.context.resume();
+                }
+            });
+
+            controls.addEventListener('unlock', () => {
+                if(!isGameEnded) {
+                    document.getElementById('ui-layer').style.display = 'none';
+                }
+            });
+
+            // Materiais do Bioma
+            const matAreia = new THREE.MeshLambertMaterial({ map: createColorTexture('#f3c68f', 15) });
+            const matGrama = new THREE.MeshLambertMaterial({ map: createColorTexture('#55aa55', 20) });
+            const matAgua = new THREE.MeshLambertMaterial({ 
+                map: createColorTexture('#2980b9', 5), transparent: true, opacity: 0.8 
+            });
+            
+            // Geração de Mundo (80x80)
+            const tamanhoMap = 80; 
+            const raioIlha = 25;
+            const raioGrama = 15;
+
+            const geometryBloco = new THREE.BoxGeometry(1, 1, 1);
+
+            for (let x = -tamanhoMap/2; x < tamanhoMap/2; x++) {
+                for (let z = -tamanhoMap/2; z < tamanhoMap/2; z++) {
+                    const dist = Math.sqrt(x*x + z*z);
+                    
+                    if (dist < raioIlha) {
+                        // Ilha
+                        let isGrama = dist < raioGrama;
+                        let chao = new THREE.Mesh(geometryBloco, isGrama ? matGrama : matAreia);
+                        chao.position.set(x, -0.5, z);
+                        chao.userData = { tipo: 'areia' };
+                        scene.add(chao);
+                        objects.push(chao);
+                    } else {
+                        // Mar
+                        let agua = new THREE.Mesh(geometryBloco, matAgua);
+                        agua.position.set(x, -1, z);
+                        scene.add(agua);
+                        
+                        // Algas marinhas (Kelp)
+                        if(Math.random() > 0.96) {
+                            let alga = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.5, 0.2), new THREE.MeshLambertMaterial({color: 0x117711}));
+                            alga.position.set(x, -0.2, z);
+                            alga.userData = { tipo: 'alga', offset: Math.random() * 100 };
+                            scene.add(alga);
+                            animals.push(alga);
+                        }
+                    }
+                }
+            }
+
+            criarCenarioExtra();
+            spawnAnimais();
+            spawnMonstros();
+
+            // Espalhar Lixo (30 peças)
+            const matLixos = [
+                new THREE.MeshLambertMaterial({ map: createTrashTexture('#1b4f72') }), // Azul escuro
+                new THREE.MeshLambertMaterial({ map: createTrashTexture('#7b241c') }), // Vermelho
+                new THREE.MeshLambertMaterial({ map: createTrashTexture('#9a7d0a') })  // Amarelo
+            ];
+
+            for (let i = 0; i < 30; i++) {
+                let lixo = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), matLixos[Math.floor(Math.random()*matLixos.length)]);
+                
+                // Distribuir na ilha e bordas
+                let xPos = (Math.random() - 0.5) * 40;
+                let zPos = (Math.random() - 0.5) * 40;
+                let yPos = Math.sqrt(xPos*xPos + zPos*zPos) < raioIlha ? 0 : -0.5;
+                
+                lixo.position.set(xPos, yPos, zPos);
+                lixo.userData = { 
+                    tipo: 'lixo', 
+                    categoria: categoriasLixo[Math.floor(Math.random() * categoriasLixo.length)], 
+                    hoverAngle: Math.random() * Math.PI * 2 
+                };
+                scene.add(lixo);
+                objects.push(lixo);
+            }
+
+            // Posição inicial do jogador
+            controls.getObject().position.set(0, 1.5, 10);
+            
+            raycaster = new THREE.Raycaster();
+            raycaster.far = 10; // Alcance do braço para coletar
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+
+            // Eventos de teclado e mouse
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousedown', onMouseClick);
+            window.addEventListener('resize', onWindowResize);
+            
+            animate();
+        }
+
+        function criarCenarioExtra() {
+            // Skybox
+            const skyGeo = new THREE.BoxGeometry(400, 400, 400);
+            const skyMat = new THREE.MeshBasicMaterial({ color: 0x87CEEB, side: THREE.BackSide });
+            scene.add(new THREE.Mesh(skyGeo, skyMat));
+
+            // Sol
+            const sunGeo = new THREE.BoxGeometry(15, 15, 1);
+            const sunMat = new THREE.MeshBasicMaterial({ color: 0xFFD700 });
+            const sun = new THREE.Mesh(sunGeo, sunMat);
+            sun.position.set(-60, 40, -80);
+            scene.add(sun);
+
+            // Nuvens
+            const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+            const cloudGeo = new THREE.BoxGeometry(4, 3, 4);
+            for(let c=0; c<15; c++) {
+                const cloud = new THREE.Group();
+                for(let i=0; i<5; i++) {
+                    const part = new THREE.Mesh(cloudGeo, cloudMat);
+                    part.position.set((Math.random()-0.5)*6, (Math.random()-0.5)*2, (Math.random()-0.5)*6);
+                    part.scale.set(1 + Math.random(), 1, 1 + Math.random());
+                    cloud.add(part);
+                }
+                cloud.position.set((Math.random()-0.5)*150, 30 + Math.random()*15, (Math.random()-0.5)*150);
+                scene.add(cloud);
+            }
+
+            // Palmeiras
+            const matTronco = new THREE.MeshLambertMaterial({ map: createColorTexture('#654321', 20) });
+            const matFolha = new THREE.MeshLambertMaterial({ map: createColorTexture('#228B22', 10) });
+            const geoBloco = new THREE.BoxGeometry(1, 1, 1);
+
+            for(let i=0; i<12; i++) {
+                const tree = new THREE.Group();
+                const altura = Math.floor(Math.random() * 2) + 4;
+                for(let y=0; y<altura; y++) {
+                    let tronco = new THREE.Mesh(geoBloco, matTronco);
+                    tronco.position.set(0, y, 0);
+                    tree.add(tronco);
+                }
+                
+                const posicoesFolhas = [
+                    [0, altura, 0], [1, altura, 0], [-1, altura, 0], [0, altura, 1], [0, altura, -1],
+                    [2, altura-1, 0], [-2, altura-1, 0], [0, altura-1, 2], [0, altura-1, -2]
+                ];
+                posicoesFolhas.forEach(p => {
+                    let folha = new THREE.Mesh(geoBloco, matFolha);
+                    folha.position.set(p[0], p[1], p[2]);
+                    tree.add(folha);
+                });
+                
+                const r = Math.random() * 15;
+                const theta = Math.random() * Math.PI * 2;
+                tree.position.set(r * Math.cos(theta), 0, r * Math.sin(theta));
+                scene.add(tree);
+            }
+        }
+
+        function spawnAnimais() {
+            const geo = new THREE.BoxGeometry(1, 0.5, 1);
+            
+            // Tartarugas (Agua)
+            const matTartaruga = new THREE.MeshLambertMaterial({color: 0x228B22});
+            for(let i=0; i<3; i++) {
+                let t = new THREE.Mesh(geo, matTartaruga);
+                t.userData = { tipo: 'tartaruga', angulo: Math.random()*Math.PI*2, raioBase: 28 + Math.random()*5, offset: Math.random()*10 };
+                scene.add(t);
+                animals.push(t);
+            }
+
+            // Golfinhos (Agua)
+            const matGolfinho = new THREE.MeshLambertMaterial({color: 0x3498db});
+            for(let i=0; i<2; i++) {
+                let g = new THREE.Mesh(geo, matGolfinho);
+                g.userData = { tipo: 'golfinho', angulo: Math.random()*Math.PI*2, raioBase: 32 + Math.random()*5, offset: Math.random()*10 };
+                scene.add(g);
+                animals.push(g);
+            }
+
+            // Caranguejos (Areia)
+            const matCaranguejo = new THREE.MeshLambertMaterial({color: 0xff4444});
+            const geoCrab = new THREE.BoxGeometry(0.4, 0.2, 0.4);
+            for(let i=0; i<5; i++) {
+                let c = new THREE.Mesh(geoCrab, matCaranguejo);
+                const r = 20 + Math.random()*4; // Borda da areia
+                const th = Math.random() * Math.PI * 2;
+                c.position.set(r*Math.cos(th), 0.1, r*Math.sin(th));
+                c.userData = { tipo: 'caranguejo', offset: Math.random()*10 };
+                scene.add(c);
+                animals.push(c);
+            }
+        }
+
+        function spawnMonstros() {
+            const matCorpo = new THREE.MeshLambertMaterial({ map: createTrashTexture('#34495e') });
+            const matOlho = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const geoCorpo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+            const geoOlho = new THREE.BoxGeometry(0.15, 0.15, 0.1);
+
+            for(let i=0; i<6; i++) {
+                const monstro = new THREE.Group();
+                const corpo = new THREE.Mesh(geoCorpo, matCorpo);
+                const olhoL = new THREE.Mesh(geoOlho, matOlho); olhoL.position.set(-0.2, 0.1, 0.41);
+                const olhoR = new THREE.Mesh(geoOlho, matOlho); olhoR.position.set(0.2, 0.1, 0.41);
+                
+                monstro.add(corpo, olhoL, olhoR);
+                
+                const r = 16 + Math.random() * 8; 
+                const theta = Math.random() * Math.PI * 2;
+                monstro.position.set(r * Math.cos(theta), 0, r * Math.sin(theta));
+                
+                corpo.userData = { tipo: 'monstro', categoria: categoriasLixo[Math.floor(Math.random() * categoriasLixo.length)] };
+                monstro.userData = { tipo: 'monstroGroup', offset: Math.random() * 100 };
+                
+                scene.add(monstro);
+                objects.push(corpo); // Apenas corpo clicável
+                animals.push(monstro); // Animação de pulo
+            }
+        }
+
+        function criarMaosJogador() {
+            playerHandsGroup = new THREE.Group();
+
+            const matPele = new THREE.MeshLambertMaterial({ color: 0xcd853f });
+            const matManga = new THREE.MeshLambertMaterial({ color: 0x008080 }); // Camisa ciano estilo Minecraft
+
+            function criarBraco() {
+                const braco = new THREE.Group();
+                const manga = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.28, 0.18), matManga);
+                manga.position.y = 0.14;
+                const mao = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.24, 0.16), matPele);
+                mao.position.y = -0.1;
+                braco.add(manga, mao);
+                return braco;
+            }
+
+            rightHandMesh = criarBraco();
+            rightHandMesh.position.set(0.38, -0.32, -0.55);
+            rightHandMesh.rotation.set(-0.35, -0.2, 0.1);
+
+            leftHandMesh = criarBraco();
+            leftHandMesh.position.set(-0.38, -0.32, -0.55);
+            leftHandMesh.rotation.set(-0.35, 0.2, -0.1);
+
+            playerHandsGroup.add(rightHandMesh, leftHandMesh);
+            camera.add(playerHandsGroup);
+        }
+
+        // --- SISTEMA DE ÁUDIO TONE.JS ---
+
+        async function initAudio() {
+            await Tone.start();
+            isAudioInitialized = true;
+            
+            // BGM (Calma, -25dB)
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "square" },
+                envelope: { attack: 0.1, decay: 0.2, sustain: 0.2, release: 1 }
+            }).toDestination();
+            synth.volume.value = -25;
+            
+            const melody = [
+                { time: "0:0", note: ["C4", "E4"] }, { time: "0:2", note: ["G4", "B4"] },
+                { time: "1:0", note: ["A3", "C4"] }, { time: "1:2", note: ["F4", "A4"] }
+            ];
+            
+            bgmSequence = new Tone.Part((time, value) => {
+                synth.triggerAttackRelease(value.note, "4n", time);
+            }, melody);
+            
+            bgmSequence.loop = true;
+            bgmSequence.loopEnd = "2m";
+            Tone.Transport.bpm.value = 100; // Um pouco mais lento
+            Tone.Transport.start();
+            bgmSequence.start();
+        }
+
+        function playCollectSound() {
+            if(!isAudioInitialized) return;
+            // Som de areia/terra quebrando
+            const noise = new Tone.NoiseSynth({
+                noise: { type: 'pink' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0 }
+            }).toDestination();
+            noise.volume.value = -15;
+            noise.triggerAttackRelease("16n");
+
+            const membrane = new Tone.MembraneSynth({
+                pitchDecay: 0.05, octaves: 1.5,
+                envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.1 }
+            }).toDestination();
+            membrane.volume.value = -8;
+            membrane.triggerAttackRelease("C2", "16n");
+        }
+
+        function playShootSound() {
+            if(!isAudioInitialized) return;
+            const synth = new Tone.Synth({
+                oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.1 }
+            }).toDestination();
+            synth.volume.value = -15;
+            synth.triggerAttackRelease("C5", "32n");
+        }
+
+        function playHitSound() {
+            if(!isAudioInitialized) return;
+            const noise = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.01, decay: 0.2 } }).toDestination();
+            noise.volume.value = -10;
+            noise.triggerAttackRelease("8n");
+        }
+
+        function playWinSound() {
+            if(!isAudioInitialized) return;
+            const synth = new Tone.PolySynth().toDestination();
+            synth.volume.value = -10;
+            synth.triggerAttackRelease(["C4", "E4", "G4", "C5"], "2n");
+        }
+
+        // --- LÓGICA DE JOGO ---
+
+        function onMouseClick() {
+            if (!controls.isLocked) return;
+
+            // Animação de soco/coleta da mão direita
+            handSwingTime = Math.PI;
+
+            if (gamePhase === 'BOSS') {
+                atirarLixoCompactado();
+                return;
+            }
+
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObjects(objects);
+
+            if (intersects.length > 0) {
+                const alvo = intersects[0].object;
+
+                if ((alvo.userData.tipo === 'lixo' || alvo.userData.tipo === 'monstro') && gamePhase === 'COLETA') {
+                    scene.remove(alvo);
+                    if(alvo.parent && alvo.parent.userData.tipo === 'monstroGroup') {
+                        scene.remove(alvo.parent); // Remove o minion inteiro
+                    }
+                    objects.splice(objects.indexOf(alvo), 1);
+                    
+                    removedTrash++;
+                    inventario[alvo.userData.categoria]++;
+                    
+                    playCollectSound();
+                    mostrarSlogan();
+                    updateHUD();
+                    checarProgresso();
+                } else if (alvo.userData.tipo === 'areia' && gamePhase === 'PLACA') {
+                    fincarPlaca(intersects[0].point);
+                    setTimeout(finalizarJogo, 1500);
+                }
+            }
+        }
+
+        function mostrarSlogan() {
+            const container = document.getElementById('slogan-container');
+            const texto = document.getElementById('slogan-text');
+            texto.innerText = slogans[Math.floor(Math.random() * slogans.length)];
+            
+            container.classList.remove('slogan-anim');
+            void container.offsetWidth; // Trigger reflow
+            container.classList.add('slogan-anim');
+        }
+
+        function checarProgresso() {
+            if (removedTrash >= metaLixo && gamePhase === 'COLETA') {
+                gamePhase = 'BOSS';
+                
+                // Mudar UI
+                const objBox = document.getElementById('objective-box');
+                const objText = document.getElementById('hud-objective');
+                objText.innerText = "👉 OBJETIVO: ATIRE NO CHEFÃO!";
+                objText.className = "font-black text-xl blink-red";
+                
+                spawnBoss();
+            }
+        }
+
+        function spawnBoss() {
+            bossGroup = new THREE.Group();
+            
+            // Corpo
+            const matCorpo = new THREE.MeshLambertMaterial({ map: createTrashTexture('#1b4f72') });
+            const corpo = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 2), matCorpo);
+            corpo.position.y = 1.5;
+            
+            // Rosto (Na frente)
+            const matRosto = new THREE.MeshBasicMaterial({ map: createBossFaceTexture() });
+            const rosto = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.8), matRosto);
+            rosto.position.set(0, 1.8, 1.01);
+            
+            // Tampa / Chapéu vermelho
+            const matTampa = new THREE.MeshLambertMaterial({ color: 0xcc0000 });
+            const tampa = new THREE.Mesh(new THREE.BoxGeometry(1, 0.5, 1), matTampa);
+            tampa.position.y = 3.25;
+
+            // Braços
+            const bracoGeo = new THREE.BoxGeometry(0.5, 2, 0.5);
+            const bracoL = new THREE.Mesh(bracoGeo, matCorpo);
+            bracoL.position.set(-1.3, 1.5, 0);
+            bracoL.userData = { tipo: 'braco', invert: 1 };
+            const bracoR = new THREE.Mesh(bracoGeo, matCorpo);
+            bracoR.position.set(1.3, 1.5, 0);
+            bracoR.userData = { tipo: 'braco', invert: -1 };
+
+            bossGroup.add(corpo, rosto, tampa, bracoL, bracoR);
+            
+            // Posicionar exatamente na frente do jogador (plantado no chão)
+            const dir = new THREE.Vector3();
+            camera.getWorldDirection(dir);
+            dir.y = 0; dir.normalize();
+            
+            const playerPos = controls.getObject().position;
+            bossGroup.position.set(playerPos.x + dir.x * 8, -0.5, playerPos.z + dir.z * 8);
+            bossGroup.lookAt(playerPos.x, -0.5, playerPos.z); // Olha pro jogador
+            
+            bossGroup.scale.set(0.8, 0.8, 0.8);
+            
+            scene.add(bossGroup);
+            
+            // Som assustador
+            if(isAudioInitialized) {
+                const synth = new Tone.FMSynth().toDestination();
+                synth.triggerAttackRelease("C2", "2n");
+            }
+        }
+
+        function atirarLixoCompactado() {
+            playShootSound();
+            const proj = new THREE.Mesh(
+                new THREE.BoxGeometry(0.3, 0.3, 0.3),
+                new THREE.MeshBasicMaterial({ color: 0xcccccc })
+            );
+            
+            // Posição inicial (câmera)
+            proj.position.copy(controls.getObject().position);
+            
+            // Direção
+            const dir = new THREE.Vector3();
+            camera.getWorldDirection(dir);
+            proj.userData = { direction: dir, life: 0 };
+            
+            scene.add(proj);
+            projectiles.push(proj);
+        }
+
+        function transformarBossEmLixeira() {
+            scene.remove(bossGroup);
+            playWinSound();
+            
+            // Criar Lixeira no mesmo lugar
+            const lixeira = new THREE.Mesh(
+                new THREE.BoxGeometry(1.5, 2, 1.5),
+                new THREE.MeshLambertMaterial({ map: createLixeiraTexture() })
+            );
+            lixeira.position.copy(bossGroup.position);
+            // Garantir que a lixeira fique plantada no chão
+            lixeira.position.y = 0.5; 
+            scene.add(lixeira);
+
+            gamePhase = 'PLACA';
+            
+            // Atualizar UI
+            const objText = document.getElementById('hud-objective');
+            objText.innerText = "👉 OBJETIVO: CLIQUE NA AREIA!";
+            objText.className = "font-black text-xl text-green";
+        }
+
+        function fincarPlaca(ponto) {
+            const textura = createSignTexture("TU FEZ TUA PARTE, TCHÊ!");
+            const matPlaca = new THREE.MeshBasicMaterial({ map: textura });
+            // Placa ligeiramente mais larga e proporcional para acolher todo o texto com folga
+            const placa = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.3, 0.12), matPlaca);
+            
+            const matHaste = new THREE.MeshLambertMaterial({ color: 0x5C4033 });
+            const haste = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.6), matHaste);
+            
+            // Montar Grupo da Placa
+            const grupoPlaca = new THREE.Group();
+            placa.position.y = 1.35;
+            haste.position.y = 0.8;
+            haste.position.z = -0.09; // Haste bem atrás da placa para não sobrepor
+            
+            grupoPlaca.add(placa);
+            grupoPlaca.add(haste);
+            
+            grupoPlaca.position.copy(ponto);
+            
+            // Fazer a placa olhar para o jogador, mantendo eixo Y fixo
+            const playerPos = controls.getObject().position;
+            grupoPlaca.lookAt(playerPos.x, grupoPlaca.position.y, playerPos.z);
+            
+            scene.add(grupoPlaca);
+        }
+
+        // --- SISTEMA DE RANKING (FEIRA) ---
+
+        function salvarRanking() {
+            const nome = document.getElementById('playerName').value || "Guardião Anônimo";
+            const turma = document.getElementById('playerClass').value || "-";
+            const score = timeLeft + removedTrash * 5; // Pontuação baseada no tempo e lixo
+
+            rankingData.push({ nome, turma, score });
+            rankingData.sort((a, b) => b.score - a.score);
+            // Removido o limite de 10 para que o scroll do ranking faça sentido
+            
+            localStorage.setItem('guardioes_ranking', JSON.stringify(rankingData));
+            mostrarRanking(); // Atualiza a barra lateral em tempo real
+        }
+
+        function mostrarRanking() {
+            const list = document.getElementById('ranking-list');
+            list.innerHTML = '';
+            
+            if(rankingData.length === 0) {
+                list.innerHTML = '<li class="text-center text-gray-400 mt-6">Nenhum guardião registrado.<br>Seja o primeiro!</li>';
+            } else {
+                rankingData.forEach((r, i) => {
+                    let medalha = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `<span class="text-gray-500 font-bold">${i+1}º</span>`;
+                    list.innerHTML += `<li class="flex flex-col bg-gray-800 p-3 rounded-lg border border-gray-600 shadow">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="font-bold text-base truncate pr-2">${medalha} ${r.nome}</span>
+                            <span class="font-black text-yellow-400 whitespace-nowrap">${r.score} pts</span>
+                        </div>
+                        <span class="text-xs text-gray-400 font-medium bg-gray-900 px-2 py-1 rounded inline-block w-max">${r.turma}</span>
+                    </li>`;
+                });
+            }
+        }
+
+        // --- FLUXO DO JOGO E EVENTOS ---
+
+        function updateHUD() {
+            document.getElementById('hud-progress').innerText = removedTrash;
+            document.getElementById('inv-garrafas').innerText = inventario["Garrafas de Plástico"];
+            document.getElementById('inv-canudos').innerText = inventario["Canudos Plásticos"];
+            document.getElementById('inv-redes').innerText = inventario["Redes de Pesca"];
+            document.getElementById('inv-pneus').innerText = inventario["Pneus"];
+        }
+
+        function startGame() {
+            if (!controls) return; // Evita que o jogo tente iniciar antes de carregar
+            
+            document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('ui-layer').style.display = 'block';
+            controls.lock();
+            initAudio();
+            
+            timerInterval = setInterval(() => {
+                if(isGameEnded) return;
+                timeLeft--;
+                const hudTime = document.getElementById('hud-time');
+                hudTime.innerText = timeLeft;
+                if(timeLeft <= 10) hudTime.classList.add('blink-red');
+                
+                if (timeLeft <= 0) {
+                    finalizarJogo(false);
+                }
+            }, 1000);
+        }
+
+        function finalizarJogo(vitoria = true) {
+            isGameEnded = true;
+            clearInterval(timerInterval);
+            controls.unlock();
+            
+            try {
+                Tone.Transport.pause();
+                Tone.Transport.stop(Tone.now() + 0.1);
+                if(bgmSequence) bgmSequence.stop(Tone.now() + 0.1);
+            } catch (e) {
+                console.warn("Erro interno do Tone.js ignorado:", e);
+            }
+
+            document.getElementById('ui-layer').style.display = 'none';
+            
+            if(vitoria) salvarRanking();
+
+            const endScreen = document.getElementById('end-screen');
+            endScreen.classList.remove('hidden');
+            
+            const nome = document.getElementById('playerName').value || "Guardião";
+            document.getElementById('end-name').innerText = nome;
+            document.getElementById('end-time').innerText = timeLeft > 0 ? timeLeft : 0;
+            document.getElementById('end-trash').innerText = removedTrash;
+            
+            if(!vitoria) {
+                endScreen.querySelector('h1').innerText = "O TEMPO ACABOU!";
+                endScreen.querySelector('h1').className = "text-5xl font-black mb-6 text-red-500 drop-shadow-lg";
+            }
+        }
+
+        // Botão Jogar
+        document.getElementById('btn-play').addEventListener('click', startGame);
+
+        const onKeyDown = function (event) {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = true; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = true; break;
+                case 'ArrowRight': case 'KeyD': moveRight = true; break;
+                case 'Space': if (controls.getObject().position.y === 1.5) velocity.y += 10; break;
+            }
+        };
+
+        const onKeyUp = function (event) {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = false; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = false; break;
+                case 'ArrowRight': case 'KeyD': moveRight = false; break;
+            }
+        };
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- LOOP PRINCIPAL (ANIMATE) ---
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (isGameEnded) return;
+
+            const time = performance.now();
+            
+            if (controls.isLocked === true) {
+                const delta = (time - prevTime) / 1000;
+
+                // Física do jogador
+                velocity.x -= velocity.x * 10.0 * delta;
+                velocity.z -= velocity.z * 10.0 * delta;
+                velocity.y -= 30.0 * delta; // Gravidade
+
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize();
+
+                const speed = 40.0;
+                if (moveForward || moveBackward) velocity.z -= direction.z * speed * delta;
+                if (moveLeft || moveRight) velocity.x -= direction.x * speed * delta;
+
+                controls.moveRight(-velocity.x * delta);
+                controls.moveForward(-velocity.z * delta);
+                controls.getObject().position.y += (velocity.y * delta);
+
+                if (controls.getObject().position.y < 1.5) {
+                    velocity.y = 0;
+                    controls.getObject().position.y = 1.5;
+                }
+
+                const gameTime = time * 0.001;
+
+                // Animação das mãozinhas (balanço ao caminhar + soco ao clicar)
+                if (rightHandMesh && leftHandMesh) {
+                    const isMoving = (moveForward || moveBackward || moveLeft || moveRight);
+                    const walkBob = isMoving ? Math.sin(gameTime * 12) * 0.04 : 0;
+                    const walkSway = isMoving ? Math.cos(gameTime * 6) * 0.03 : 0;
+
+                    let swingOffset = 0;
+                    if (handSwingTime > 0) {
+                        handSwingTime = Math.max(0, handSwingTime - delta * 15);
+                        swingOffset = Math.sin(handSwingTime) * 0.6;
+                    }
+
+                    rightHandMesh.position.y = -0.32 + walkBob + (swingOffset * 0.15);
+                    rightHandMesh.position.z = -0.55 - (swingOffset * 0.2);
+                    rightHandMesh.rotation.x = -0.35 + (swingOffset * 1.1);
+
+                    leftHandMesh.position.y = -0.32 - walkBob;
+                    leftHandMesh.position.x = -0.38 + walkSway;
+                }
+
+                // Animação de Lixos e Animais
+                objects.forEach(obj => {
+                    if (obj.userData.tipo === 'lixo') {
+                        // Boiar suavemente
+                        obj.position.y = (obj.position.y < -0.2 ? -0.5 : 0) + Math.sin(gameTime * 2 + obj.userData.hoverAngle) * 0.1;
+                        obj.rotation.y += delta * 0.5;
+                    }
+                });
+
+                animals.forEach(animal => {
+                    if(animal.userData.tipo === 'tartaruga') {
+                        animal.userData.angulo += delta * 0.1;
+                        animal.position.x = animal.userData.raioBase * Math.cos(animal.userData.angulo);
+                        animal.position.z = animal.userData.raioBase * Math.sin(animal.userData.angulo);
+                        animal.rotation.y = -animal.userData.angulo; 
+                        animal.position.y = -1.2 + Math.sin(gameTime * 2 + animal.userData.offset) * 0.2;
+                    } else if(animal.userData.tipo === 'golfinho') {
+                        animal.userData.angulo -= delta * 0.2;
+                        animal.position.x = animal.userData.raioBase * Math.cos(animal.userData.angulo);
+                        animal.position.z = animal.userData.raioBase * Math.sin(animal.userData.angulo);
+                        animal.rotation.y = -animal.userData.angulo + Math.PI; 
+                        animal.position.y = Math.sin(gameTime * 3 + animal.userData.offset) * 2 - 0.5;
+                        animal.rotation.x = Math.cos(gameTime * 3 + animal.userData.offset) * 0.5;
+                    } else if(animal.userData.tipo === 'caranguejo') {
+                        animal.position.x += Math.sin(gameTime * 5 + animal.userData.offset) * 0.02;
+                        animal.rotation.y = Math.sin(gameTime + animal.userData.offset) * 0.5;
+                    } else if(animal.userData.tipo === 'alga') {
+                        animal.rotation.z = Math.sin(gameTime * 1.5 + animal.userData.offset) * 0.2;
+                    } else if(animal.userData.tipo === 'monstroGroup') {
+                        animal.position.y = Math.abs(Math.sin(gameTime * 5 + animal.userData.offset)) * 0.8;
+                        animal.rotation.y += delta * 0.5;
+                    }
+                });
+
+                // Animação do Boss e Projéteis
+                if (gamePhase === 'BOSS' && bossGroup) {
+                    // Braços mexendo
+                    bossGroup.children.forEach(child => {
+                        if(child.userData.tipo === 'braco') {
+                            child.rotation.x = Math.sin(gameTime * 5) * 0.5 * child.userData.invert;
+                        }
+                    });
+
+                    // Projéteis
+                    for(let i = projectiles.length - 1; i >= 0; i--) {
+                        let p = projectiles[i];
+                        p.position.addScaledVector(p.userData.direction, 20 * delta);
+                        p.userData.life += delta;
+                        
+                        // Checar colisão com o Boss
+                        const dist = p.position.distanceTo(bossGroup.position);
+                        if(dist < 2.5) { // Hitbox
+                            playHitSound();
+                            scene.remove(p);
+                            projectiles.splice(i, 1);
+                            
+                            // Efeito de dano (piscar vermelho)
+                            bossGroup.children[0].material.color.setHex(0xff0000);
+                            setTimeout(() => { if(bossGroup) bossGroup.children[0].material.color.setHex(0xffffff); }, 100);
+
+                            bossHealth--;
+                            if(bossHealth <= 0) {
+                                transformarBossEmLixeira();
+                            }
+                        } else if (p.userData.life > 2) {
+                            scene.remove(p);
+                            projectiles.splice(i, 1);
+                        }
+                    }
+                }
+            }
+
+            prevTime = time;
+            renderer.render(scene, camera);
+        }
+
+        // Iniciar
+        window.onload = () => {
+            init();
+            mostrarRanking(); // Exibe o ranking assim que a página carrega
+        };
+    </script>
+</body>
+</html>
